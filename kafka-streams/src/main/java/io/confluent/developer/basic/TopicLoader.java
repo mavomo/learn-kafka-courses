@@ -41,17 +41,15 @@ public class TopicLoader {
 
             };
 
-            var rawRecords = List.of("orderNumber-1001",
-                                               "orderNumber-5000",
-                                               "orderNumber-999",
-                                               "orderNumber-3330",
-                                               "bogus-1",
-                                               "bogus-2",
-                                               "orderNumber-8400");
+            var rawRecords = List.of("orderNumber-1039",
+                                               "orderNumber-8032",
+                                               "orderNumber-677",
+                                               "orderNumber-2136",
+                                               "bogus-45",
+                                               "bogus-47",
+                                               "orderNumber-7543");
             var producerRecords = rawRecords.stream().map(r -> new ProducerRecord<>(inputTopic,"order-key", r)).collect(Collectors.toList());
             producerRecords.forEach((pr -> producer.send(pr, callback)));
-
-
         }
     }
 }
