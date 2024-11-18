@@ -33,7 +33,9 @@ public class TopicLoader {
             final String outputTopic = properties.getProperty("aggregate.output.topic");
             var topics = List.of(StreamsUtils.createTopic(inputTopic), StreamsUtils.createTopic(outputTopic));
             adminClient.createTopics(topics);
+            var serviceAccountName ="User:"+properties.getProperty("service.account.name");
 
+            TopicAclConfigurer.createTopicWithAcls(adminClient, topics, serviceAccountName);
             Callback callback = StreamsUtils.callback();
 
             Instant instant = Instant.now();
@@ -83,9 +85,8 @@ public class TopicLoader {
                         electronicOrder);
                 producer.send(producerRecord, callback);
             }));
-
-
-
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 }

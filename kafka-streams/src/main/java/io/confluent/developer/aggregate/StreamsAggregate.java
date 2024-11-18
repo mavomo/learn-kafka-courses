@@ -30,11 +30,9 @@ public class StreamsAggregate {
         final String outputTopic = streamsProps.getProperty("aggregate.output.topic");
         final Map<String, Object> configMap = StreamsUtils.propertiesToMap(streamsProps);
 
-        final SpecificAvroSerde<ElectronicOrder> electronicSerde =
-                StreamsUtils.getSpecificAvroSerde(configMap);
+        final SpecificAvroSerde<ElectronicOrder> electronicSerde = StreamsUtils.getSpecificAvroSerde(configMap);
 
-        final KStream<String, ElectronicOrder> electronicStream =
-                builder.stream(inputTopic, Consumed.with(Serdes.String(), electronicSerde))
+        final KStream<String, ElectronicOrder> electronicStream = builder.stream(inputTopic, Consumed.with(Serdes.String(), electronicSerde))
                         .peek((key, value) -> System.out.println("Incoming record - key " + key + " value " + value));
 
         // Now take the electronicStream object, group by key and perform an aggregation
@@ -42,8 +40,7 @@ public class StreamsAggregate {
         electronicStream.groupByKey().aggregate(null, null);
 
         // To view the results of the aggregation consider
-        // right after the toStream() method .peek((key, value) -> System.out.println("Outgoing record - key " +key +" value " + value))
-
+        // right after the toStream() method.peek((key, value) -> System.out.println("Outgoing record - key " +key +" value " + value))
         // Finally write the results to an output topic
         //  .to(outputTopic, Produced.with(Serdes.String(), Serdes.Double()));
 
