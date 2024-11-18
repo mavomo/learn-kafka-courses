@@ -5,6 +5,7 @@ import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler;
 import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Produced;
@@ -31,23 +32,35 @@ public class KTableExample {
 
         final String orderNumberStart = "orderNumber-";
 
-        // Crate a table with the StreamBuilder from above and use the table method
+        // Create a table with the StreamBuilder from above and use the table method
         // along with the inputTopic create a Materialized instance and name the store
         // and provide a Serdes for the key and the value  HINT: Materialized.<String, String, KeyValueStore<Bytes, byte[]>>as
         // then use two methods to specify the key and value serde
-        KTable<String, String> firstKTable = null;
+        KTable<String, String> firstKTable = builder.table(inputTopic,
+                Materialized.<String, String, KeyValueStore<Bytes, byte[]>>as("ktable-store")
+                        .withKeySerde(Serdes.String())
+                        .withValueSerde(Serdes.String()));
 
         firstKTable.filter((key, value) -> value.contains(orderNumberStart))
                 .mapValues(value -> value.substring(value.indexOf("-") + 1))
-                .filter((key, value) -> Long.parseLong(value) > 1000);
+                .filter((key, value) -> Long.parseLong(value) > 1000)
                 // Add a method here to covert the table to a stream
+                .toStream()
                 // Then uncomment the following two lines to view results on the console and write to a topic
-                //.peek((key, value) -> System.out.println("Outgoing record - key " +key +" value " + value))
-                //.to(outputTopic, Produced.with(Serdes.String(), Serdes.String()));
+                .peek((key, value) -> System.out.println("Outgoing record - key " +key +" value " + value))
+                .to(outputTopic, Produced.with(Serdes.String(), Serdes.String()));
 
 
         try (KafkaStreams kafkaStreams = new KafkaStreams(builder.build(), streamsProps)) {
             final CountDownLatch shutdownLatch = new CountDownLatch(1);
+            kafkaStreams.setStateListener((newState, oldState) -> {
+                System.out.println("State transition from " + oldState + " to " + newState);
+            });
+
+            kafkaStreams.setUncaughtExceptionHandler( uncaughtHandler -> {
+                System.out.println("ktable-application got an error: " + uncaughtHandler.getMessage());
+                return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_APPLICATION;
+            });
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 kafkaStreams.close(Duration.ofSeconds(2));

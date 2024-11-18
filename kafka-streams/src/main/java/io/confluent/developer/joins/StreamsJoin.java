@@ -11,6 +11,7 @@ import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.JoinWindows;
 import org.apache.kafka.streams.kstream.Joined;
@@ -60,49 +61,62 @@ public class StreamsJoin {
                         .setElectronicOrderId(electronicOrder.getOrderId())
                         .setTime(Instant.now().toEpochMilli())
                         .build();
-
+        System.out.println("1. Debug - After ValueJoiner");
         ValueJoiner<CombinedOrder, User, CombinedOrder> enrichmentJoiner = (combined, user) -> {
             if (user != null) {
                 combined.setUserName(user.getName());
             }
             return combined;
         };
+        System.out.println("2. Debug - After EnrichmentJoiner");
 
-        KStream<String, ApplianceOrder> applianceStream =
-                builder.stream(streamOneInput, Consumed.with(Serdes.String(), applianceSerde))
-                        .peek((key, value) -> System.out.println("Appliance stream incoming record key " + key + " value " + value));
+        KStream<String, ApplianceOrder> applianceStream = builder.stream(streamOneInput, Consumed.with(Serdes.String(), applianceSerde))
+                .peek((key, value) -> System.out.println("Appliance stream incoming record key " + key + " value " + value));
 
-        KStream<String, ElectronicOrder> electronicStream =
-                builder.stream(streamTwoInput, Consumed.with(Serdes.String(), electronicSerde))
-                        .peek((key, value) -> System.out.println("Electronic stream incoming record " + key + " value " + value));
+        System.out.println("3. Debug - After applianceStream");
 
-        KTable<String, User> userTable =
-                builder.table(tableInput, Materialized.with(Serdes.String(), userSerde));
+        KStream<String, ElectronicOrder> electronicStream = builder.stream(streamTwoInput, Consumed.with(Serdes.String(), electronicSerde))
+                .peek((key, value) -> System.out.println("Electronic stream incoming record " + key + " value " + value));
 
-        KStream<String, CombinedOrder> combinedStream = null;
-        // create a Join between the applianceStream and the electronicStream
-        // using the ValueJoiner created above, orderJoiner gets you the correct value type of CombinedOrder
-        // You want to join records within 30 minutes of each other HINT: JoinWindows and Duration.ofMinutes
-        // Add the correct Serdes for the join state stores remember both sides have same key type
-        // HINT: StreamJoined and Serdes.String  and Serdes for the applianceStream and electronicStream created above
+        System.out.println("4. Debug - After electronicStream");
 
-        // Optionally add this statement after the join to see the results on the console
-        // .peek((key, value) -> System.out.println("Stream-Stream Join record key " + key + " value " + value));
+        KTable<String, User> userTable = builder.table(tableInput, Materialized.with(Serdes.String(), userSerde));
+        System.out.println("5. Debug - After userTable");
+
+        KStream<String, CombinedOrder> combinedStream = applianceStream.join(electronicStream,
+                        // using the ValueJoiner created above, orderJoiner gets you the correct value type of CombinedOrder
+                        orderJoiner,
+                        // You want to join records within 30 minutes of each other HINT: JoinWindows and Duration.ofMinutes
+                        JoinWindows.ofTimeDifferenceAndGrace(Duration.ofMinutes(30), Duration.ofMinutes(10)),
+                        StreamJoined.with(Serdes.String(), applianceSerde, electronicSerde))
+                // Optionally add this statement after the join to see the results on the console
+                .peek((key, value) -> System.out.println("Stream-Stream Join record key " + key + " value " + value));
+        System.out.println("6. Debug - After combinedStream");
 
 
         // Now join the combinedStream with the userTable,
-        // but you'll always want a result even if no corresponding entry is found in the table
-        // Using the ValueJoiner created above, enrichmentJoiner, return a CombinedOrder instance enriched with user information
-        // You'll need to add a Joined instance with the correct Serdes for the join state store
-
-        // Add these two statements after the join call to print results to the console and write results out
-        // to a topic
-
-        // .peek((key, value) -> System.out.println("Stream-Table Join record key " + key + " value " + value))
-        // .to(outputTopic, Produced.with(Serdes.String(), combinedSerde));
+        combinedStream.leftJoin(
+                        userTable,
+                        // but you'll always want a result even if no corresponding entry is found in the table
+                        // Using the ValueJoiner created above, enrichmentJoiner, return a CombinedOrder instance enriched with user information
+                        enrichmentJoiner,
+                        // You'll need to add a Joined instance with the correct Serdes for the join state store
+                        Joined.with(Serdes.String(), combinedSerde, userSerde))
+                // Add these two statements after the join call to print results to the console and write results out
+                .peek((key, value) -> System.out.println("Stream-Table Join record key " + key + " value " + value))
+                // to a topic
+                .to(outputTopic, Produced.with(Serdes.String(), combinedSerde));
 
         try (KafkaStreams kafkaStreams = new KafkaStreams(builder.build(), streamsProps)) {
             final CountDownLatch shutdownLatch = new CountDownLatch(1);
+            kafkaStreams.setStateListener((newState, oldState) -> {
+                System.out.println("[StreamJoins] - State transition from " + oldState + " to " + newState);
+            });
+
+            kafkaStreams.setUncaughtExceptionHandler( uncaughtHandler -> {
+                System.out.println("[StreamJoins] application got an error: " + uncaughtHandler.getMessage());
+                return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_APPLICATION;
+            });
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 kafkaStreams.close(Duration.ofSeconds(2));
@@ -113,6 +127,7 @@ public class StreamsJoin {
                 kafkaStreams.start();
                 shutdownLatch.await();
             } catch (Throwable e) {
+                System.out.println("Error on starting the app --- " + e);
                 System.exit(1);
             }
         }
